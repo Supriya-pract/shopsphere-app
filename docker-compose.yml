@@ -1,0 +1,25 @@
+version: "3.9"
+
+
+services:
+
+ order-service:
+   build:
+    ./services/order-service
+   ports:
+    - "8001:8000"
+
+
+ payment-service:
+   build:
+    ./services/payment-service
+   ports:
+    - "8002:8000"
+
+
+ inventory-service:
+   build:
+    ./services/inventory-service
+   ports:
+    - "8003:8000"
+

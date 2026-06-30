@@ -1,0 +1,60 @@
+name: ShopSphere CI
+
+
+on:
+ push:
+   branches:
+    - main
+    - develop
+
+ pull_request:
+
+
+jobs:
+
+ build-test:
+
+  runs-on: ubuntu-latest
+
+
+  steps:
+
+  - name: Checkout
+    uses: actions/checkout@v4
+
+
+  - name: Setup Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.12"
+
+
+  - name: Install dependencies
+    run: |
+      pip install pytest
+
+
+  - name: Run Tests
+    run: |
+      pytest
+
+
+  - name: Sonar Scan
+    uses: SonarSource/sonarqube-scan-action@v5
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+
+  - name: Docker Build
+    run: |
+      docker build \
+      -t order-service \
+      services/order-service
+
+
+  - name: Trivy Scan
+    uses: aquasecurity/trivy-action@master
+    with:
+      image-ref: order-service
+      severity: HIGH,CRITICAL
+
