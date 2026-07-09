@@ -8,7 +8,10 @@ on:
     - develop
 
  pull_request:
-
+ 
+permissions: 
+ id-token: write
+ contents: read
 
 jobs:
 
@@ -21,7 +24,15 @@ jobs:
 
   - name: Checkout
     uses: actions/checkout@v4
+    
+  - name: Configure AWS Credentials
+    uses: aws-actions/configure-aws-credentials@v4
+    with:
+      role-to-assume: arn:aws:iam::423308949200:role/ShopSphereGitHubECRRole
+      aws-region: ap-south-1
 
+  - name: Login to ECR
+    uses: aws-actions/amazon-ecr-login@v2  
 
   - name: Setup Python
     uses: actions/setup-python@v5
@@ -45,11 +56,33 @@ jobs:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
 
-  - name: Docker Build
+  - name: Build and Push Images
+    env:
+      REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      REPOSITORY: shopsphere-services
+      SHA: ${{ github.sha }}
+
     run: |
-      docker build \
-      -t order-service \
+
+      docker buildx build \
+      --platform linux/amd64 \
+      -t $REGISTRY/$REPOSITORY/order-service:$SHA \
+      --push \
       services/order-service
+
+
+      docker buildx build \
+      --platform linux/amd64 \
+      -t $REGISTRY/$REPOSITORY/payment-service:$SHA \
+      --push \
+      services/payment-service
+
+
+      docker buildx build \
+      --platform linux/amd64 \
+      -t $REGISTRY/$REPOSITORY/inventory-service:$SHA \
+      --push \
+      services/inventory-service
 
 
   - name: Trivy Scan
