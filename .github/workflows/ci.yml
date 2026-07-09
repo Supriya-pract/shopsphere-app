@@ -1,93 +1,113 @@
 name: ShopSphere CI
 
-
 on:
- push:
-   branches:
-    - main
-    - develop
+  push:
+    branches:
+      - main
+      - develop
 
- pull_request:
- 
-permissions: 
- id-token: write
- contents: read
+  pull_request:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
 
 jobs:
+  build-test:
+    runs-on: ubuntu-latest
 
- build-test:
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-  runs-on: ubuntu-latest
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::423308949200:role/ShopSphereGitHubECRRole
+          aws-region: ${{ env.AWS_REGION }}
 
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-  steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-  - name: Checkout
-    uses: actions/checkout@v4
-    
-  - name: Configure AWS Credentials
-    uses: aws-actions/configure-aws-credentials@v4
-    with:
-      role-to-assume: arn:aws:iam::423308949200:role/ShopSphereGitHubECRRole
-      aws-region: ap-south-1
+      - name: Install Dependencies
+        run: |
+          pip install -r services/order-service/requirements.txt
+          pip install -r services/payment-service/requirements.txt
+          pip install -r services/inventory-service/requirements.txt
+          pip install pytest
 
-  - name: Login to ECR
-    uses: aws-actions/amazon-ecr-login@v2  
+      - name: Run Unit Tests
+        run: |
+          pytest services/order-service
+          pytest services/payment-service
+          pytest services/inventory-service
 
-  - name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: "3.12"
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-  - name: Install dependencies
-    run: |
-      pip install pytest
+      - name: Build Docker Images
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -t $REGISTRY/order-service:$SHA \
+            services/order-service
 
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -t $REGISTRY/payment-service:$SHA \
+            services/payment-service
 
-  - name: Run Tests
-    run: |
-      pytest
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -t $REGISTRY/inventory-service:$SHA \
+            services/inventory-service
 
+      - name: Trivy Scan - Order Service
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/order-service:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
 
-  - name: Sonar Scan
-    uses: SonarSource/sonarqube-scan-action@v5
-    env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: Trivy Scan - Payment Service
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/payment-service:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
 
+      - name: Trivy Scan - Inventory Service
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/inventory-service:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
 
-  - name: Build and Push Images
-    env:
-      REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-      REPOSITORY: shopsphere-services
-      SHA: ${{ github.sha }}
-
-    run: |
-
-      docker buildx build \
-      --platform linux/amd64 \
-      -t $REGISTRY/$REPOSITORY/order-service:$SHA \
-      --push \
-      services/order-service
-
-
-      docker buildx build \
-      --platform linux/amd64 \
-      -t $REGISTRY/$REPOSITORY/payment-service:$SHA \
-      --push \
-      services/payment-service
-
-
-      docker buildx build \
-      --platform linux/amd64 \
-      -t $REGISTRY/$REPOSITORY/inventory-service:$SHA \
-      --push \
-      services/inventory-service
-
-
-  - name: Trivy Scan
-    uses: aquasecurity/trivy-action@master
-    with:
-      image-ref: order-service
-      severity: HIGH,CRITICAL
-
+      - name: Push Images to Amazon ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker push $REGISTRY/order-service:$SHA
+          docker push $REGISTRY/payment-service:$SHA
+          docker push $REGISTRY/inventory-service:$SHA
