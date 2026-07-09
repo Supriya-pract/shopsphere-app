@@ -47,9 +47,9 @@ jobs:
 
       - name: Run Unit Tests
         run: |
-          pytest services/order-service
-          pytest services/payment-service
-          pytest services/inventory-service
+          pytest services/order-service || [[ $? == 5 ]]
+          pytest services/payment-service || [[ $? == 5 ]]
+          pytest services/inventory-service || [[ $? == 5 ]]
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v5
